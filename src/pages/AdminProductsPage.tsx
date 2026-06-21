@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { Product, Supplier } from '../types';
 import {
@@ -9,10 +9,11 @@ import {
   toggleListed,
 } from '../services/productService';
 import { getAllSuppliers } from '../services/supplierService';
-import { uploadProductImage } from '../services/storageService';
+import { deleteProductImage, uploadProductImage } from '../services/storageService';
 import { Modal } from '../components';
 import StatusBadge from '../components/admin/StatusBadge';
 import { useToast } from '../context/ToastContext';
+import { useRefreshOnNavigate } from '../hooks/useRefreshOnNavigate';
 
 const categories = ['Sauces', 'Sweeteners', 'Oils', 'Spices', 'Grains', 'Dairy', 'Other'];
 
@@ -27,6 +28,10 @@ const AdminProductsPage: React.FC = () => {
   const [toDelete, setToDelete] = useState<Product | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState('');
+  const [existingImageUrl, setExistingImageUrl] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewBlobRef = useRef<string | null>(null);
   const [form, setForm] = useState({
     name: '',
     category: 'Sauces',
@@ -50,16 +55,46 @@ const AdminProductsPage: React.FC = () => {
   }, [addToast]);
 
   useEffect(() => { load(); }, [load]);
+  useRefreshOnNavigate('/labadmin/products', load);
 
-  const openCreate = () => {
-    setEditing(null);
-    setForm({ name: '', category: 'Sauces', description: '', cost_price: '', selling_price: '', supplier_id: '', stock_quantity: '0' });
+  useEffect(() => {
+    return () => {
+      if (previewBlobRef.current) {
+        URL.revokeObjectURL(previewBlobRef.current);
+      }
+    };
+  }, []);
+
+  const resetImageState = () => {
+    if (previewBlobRef.current) {
+      URL.revokeObjectURL(previewBlobRef.current);
+      previewBlobRef.current = null;
+    }
     setImageFile(null);
     setImagePreview('');
+    setExistingImageUrl('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const refreshSuppliers = async () => {
+    try {
+      setSuppliers(await getAllSuppliers());
+    } catch {
+      addToast('Failed to refresh suppliers', 'error');
+    }
+  };
+
+  const openCreate = async () => {
+    setEditing(null);
+    setForm({ name: '', category: 'Sauces', description: '', cost_price: '', selling_price: '', supplier_id: '', stock_quantity: '0' });
+    resetImageState();
+    await refreshSuppliers();
     setModalOpen(true);
   };
 
-  const openEdit = (p: Product) => {
+  const openEdit = async (p: Product) => {
     setEditing(p);
     setForm({
       name: p.name,
@@ -70,15 +105,36 @@ const AdminProductsPage: React.FC = () => {
       supplier_id: p.supplier_id || '',
       stock_quantity: String(p.stock_quantity),
     });
+    resetImageState();
+    setExistingImageUrl(p.image_url || '');
     setImagePreview(p.image_url || '');
-    setImageFile(null);
+    await refreshSuppliers();
     setModalOpen(true);
+  };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (previewBlobRef.current) {
+      URL.revokeObjectURL(previewBlobRef.current);
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    previewBlobRef.current = previewUrl;
+    setImageFile(file);
+    setImagePreview(previewUrl);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
+
+    setSubmitting(true);
     try {
-      let imageUrl = editing?.image_url || '';
+      let imageUrl = existingImageUrl;
+      const previousImageUrl = existingImageUrl;
+
       if (imageFile) {
         imageUrl = await uploadProductImage(imageFile);
       }
@@ -90,30 +146,46 @@ const AdminProductsPage: React.FC = () => {
         cost_price: parseFloat(form.cost_price),
         selling_price: parseFloat(form.selling_price),
         supplier_id: form.supplier_id || null,
-        stock_quantity: parseInt(form.stock_quantity) || 0,
+        stock_quantity: parseInt(form.stock_quantity, 10) || 0,
         image_url: imageUrl,
         is_listed: editing?.is_listed ?? false,
       };
 
       if (editing) {
-        await updateProduct(editing.id, payload);
+        const updated = await updateProduct(editing.id, payload);
+        setProducts((prev) => [updated, ...prev.filter((p) => p.id !== updated.id)]);
+        if (imageFile && previousImageUrl && previousImageUrl !== imageUrl) {
+          try {
+            await deleteProductImage(previousImageUrl);
+          } catch {
+            // Product is saved; old image cleanup is best-effort
+          }
+        }
         addToast('Product updated', 'success');
       } else {
-        await createProduct(payload);
+        const created = await createProduct(payload);
+        setProducts((prev) => [created, ...prev.filter((p) => p.id !== created.id)]);
         addToast('Product created', 'success');
       }
+
+      resetImageState();
       setModalOpen(false);
-      load();
-    } catch {
-      addToast('Failed to save product', 'error');
+      await load();
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : 'Failed to save product', 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleToggleListed = async (p: Product) => {
     try {
       await toggleListed(p.id, !p.is_listed);
+      setProducts((prev) =>
+        prev.map((item) => (item.id === p.id ? { ...item, is_listed: !p.is_listed } : item))
+      );
       addToast(p.is_listed ? 'Product unlisted' : 'Product listed on store', 'success');
-      load();
+      await load();
     } catch {
       addToast('Failed to update listing', 'error');
     }
@@ -123,9 +195,10 @@ const AdminProductsPage: React.FC = () => {
     if (!toDelete) return;
     try {
       await deleteProduct(toDelete.id);
+      setProducts((prev) => prev.filter((p) => p.id !== toDelete.id));
       addToast('Product deleted', 'success');
       setDeleteOpen(false);
-      load();
+      await load();
     } catch {
       addToast('Failed to delete product', 'error');
     }
@@ -142,13 +215,18 @@ const AdminProductsPage: React.FC = () => {
           <h1 className="text-2xl font-bold text-earth-900">Product Listings</h1>
           <p className="text-sm text-earth-500 mt-1">Manage store products and publish to customers</p>
         </div>
-        <button onClick={openCreate} className="flex items-center px-4 py-2 bg-organic-600 text-white rounded-lg hover:bg-organic-700">
+        <button onClick={() => void openCreate()} className="flex items-center px-4 py-2 bg-organic-600 text-white rounded-lg hover:bg-organic-700">
           <PlusIcon className="h-5 w-5 mr-2" /> Add Product
         </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {products.map((p) => (
+        {products.length === 0 ? (
+          <div className="col-span-full bg-white rounded-lg shadow p-8 text-center text-earth-500">
+            No products yet. Click &quot;Add Product&quot; to create one.
+          </div>
+        ) : (
+          products.map((p) => (
           <div key={p.id} className="bg-white rounded-lg shadow overflow-hidden">
             <div className="h-40 bg-earth-100">
               <img src={p.image_url || 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=400'} alt={p.name} className="w-full h-full object-cover" />
@@ -162,7 +240,7 @@ const AdminProductsPage: React.FC = () => {
               <p className="text-sm text-earth-600 mb-2">Stock: {p.stock_quantity}</p>
               <p className="text-lg font-bold text-organic-700 mb-3">₨{Number(p.selling_price).toLocaleString()}</p>
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => openEdit(p)} className="flex-1 px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm"><PencilIcon className="h-4 w-4 inline" /> Edit</button>
+                <button onClick={() => void openEdit(p)} className="flex-1 px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm"><PencilIcon className="h-4 w-4 inline" /> Edit</button>
                 <button onClick={() => handleToggleListed(p)} className="flex-1 px-2 py-1 bg-organic-100 text-organic-700 rounded text-sm">
                   {p.is_listed ? 'Unlist' : 'List'}
                 </button>
@@ -170,7 +248,8 @@ const AdminProductsPage: React.FC = () => {
               </div>
             </div>
           </div>
-        ))}
+        ))
+        )}
       </div>
 
       <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit Product' : 'Add Product'} size="lg">
@@ -178,10 +257,15 @@ const AdminProductsPage: React.FC = () => {
           <div>
             <label className="block text-sm font-medium mb-1">Image</label>
             {imagePreview && <img src={imagePreview} alt="" className="w-24 h-24 object-cover rounded mb-2" />}
-            <input type="file" accept="image/*" onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) { setImageFile(f); setImagePreview(URL.createObjectURL(f)); }
-            }} className="text-sm" />
+            <input
+              ref={fileInputRef}
+              key={editing?.id ?? 'new'}
+              type="file"
+              accept="image/*"
+              onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
+              onChange={handleImageSelect}
+              className="text-sm"
+            />
           </div>
           <input required placeholder="Product name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-4 py-2 border rounded-lg" />
           <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full px-4 py-2 border rounded-lg">
@@ -199,7 +283,9 @@ const AdminProductsPage: React.FC = () => {
           {!editing && (
             <input type="number" min="0" placeholder="Initial stock" value={form.stock_quantity} onChange={(e) => setForm({ ...form, stock_quantity: e.target.value })} className="w-full px-4 py-2 border rounded-lg" />
           )}
-          <button type="submit" className="w-full btn-primary py-2">{editing ? 'Update' : 'Create'}</button>
+          <button type="submit" disabled={submitting} className="w-full btn-primary py-2 disabled:opacity-50">
+            {submitting ? 'Saving...' : editing ? 'Update' : 'Create'}
+          </button>
         </form>
       </Modal>
 

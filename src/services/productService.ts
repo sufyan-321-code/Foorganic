@@ -40,17 +40,34 @@ export async function getAllProducts(): Promise<Product[]> {
 export async function createProduct(
   product: Omit<Product, 'id' | 'created_at' | 'supplier'>
 ): Promise<Product> {
-  const { data, error } = await supabase.from('products').insert(product).select().single();
+  const { data, error } = await supabase
+    .from('products')
+    .insert(product)
+    .select('*, supplier:suppliers(*)')
+    .single();
   if (error) throw error;
   return data;
 }
 
-export async function updateProduct(id: string, updates: Partial<Product>): Promise<Product> {
+type ProductUpdatePayload = Pick<
+  Product,
+  | 'name'
+  | 'category'
+  | 'description'
+  | 'cost_price'
+  | 'selling_price'
+  | 'supplier_id'
+  | 'stock_quantity'
+  | 'image_url'
+  | 'is_listed'
+>;
+
+export async function updateProduct(id: string, updates: ProductUpdatePayload): Promise<Product> {
   const { data, error } = await supabase
     .from('products')
     .update(updates)
     .eq('id', id)
-    .select()
+    .select('*, supplier:suppliers(*)')
     .single();
 
   if (error) throw error;

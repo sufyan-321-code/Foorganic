@@ -8,6 +8,7 @@ import {
 import { Modal } from '../components';
 import StatusBadge from '../components/admin/StatusBadge';
 import { useToast } from '../context/ToastContext';
+import { useRefreshOnNavigate } from '../hooks/useRefreshOnNavigate';
 
 const AdminOrdersPage: React.FC = () => {
   const { addToast } = useToast();
@@ -27,6 +28,7 @@ const AdminOrdersPage: React.FC = () => {
   }, [addToast]);
 
   useEffect(() => { load(); }, [load]);
+  useRefreshOnNavigate('/labadmin/orders', load);
 
   const filtered = orders.filter((o) => {
     if (filter === 'pending') return o.order_status === 'pending';
@@ -38,7 +40,7 @@ const AdminOrdersPage: React.FC = () => {
     try {
       await updateOrderStatus(id, status);
       addToast('Order status updated', 'success');
-      load();
+      await load();
       if (selected?.id === id) setSelected({ ...selected, order_status: status });
     } catch {
       addToast('Failed to update status', 'error');
@@ -49,7 +51,7 @@ const AdminOrdersPage: React.FC = () => {
     try {
       await markPaymentReceived(id);
       addToast('Payment marked as received', 'success');
-      load();
+      await load();
     } catch {
       addToast('Failed to update payment', 'error');
     }

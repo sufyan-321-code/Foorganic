@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ShoppingBagIcon,
@@ -11,6 +11,7 @@ import { Order } from '../types';
 import { getDashboardStats, getAllOrders } from '../services/orderService';
 import StatsCard from '../components/admin/StatsCard';
 import StatusBadge from '../components/admin/StatusBadge';
+import { useRefreshOnNavigate } from '../hooks/useRefreshOnNavigate';
 
 const AdminDashboardPage: React.FC = () => {
   const [stats, setStats] = useState({
@@ -23,20 +24,20 @@ const AdminDashboardPage: React.FC = () => {
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [statsData, orders] = await Promise.all([getDashboardStats(), getAllOrders()]);
-        setStats(statsData);
-        setRecentOrders(orders.slice(0, 5));
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
+  const load = useCallback(async () => {
+    try {
+      const [statsData, orders] = await Promise.all([getDashboardStats(), getAllOrders()]);
+      setStats(statsData);
+      setRecentOrders(orders.slice(0, 5));
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+  useRefreshOnNavigate('/labadmin/dashboard', load);
 
   if (loading) {
     return (

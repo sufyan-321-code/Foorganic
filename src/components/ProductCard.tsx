@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { StoreProduct } from '../types';
 import { useCart } from '../context/CartContext';
@@ -11,6 +11,10 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const { addToCart } = useCart();
   const [imageError, setImageError] = useState(false);
   const outOfStock = product.stock_quantity <= 0;
+
+  useEffect(() => {
+    setImageError(false);
+  }, [product.image]);
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();

@@ -7,6 +7,7 @@ import { getAllProducts } from '../services/productService';
 import { Modal } from '../components';
 import StatusBadge from '../components/admin/StatusBadge';
 import { useToast } from '../context/ToastContext';
+import { useRefreshOnNavigate } from '../hooks/useRefreshOnNavigate';
 
 const AdminPurchasesPage: React.FC = () => {
   const { addToast } = useToast();
@@ -14,6 +15,7 @@ const AdminPurchasesPage: React.FC = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState({ supplier_id: '', product_id: '', quantity: '', unit_cost: '' });
 
@@ -35,22 +37,41 @@ const AdminPurchasesPage: React.FC = () => {
   }, [addToast]);
 
   useEffect(() => { load(); }, [load]);
+  useRefreshOnNavigate('/labadmin/purchases', load);
+
+  const openCreateModal = async () => {
+    try {
+      const [sup, prod] = await Promise.all([getAllSuppliers(), getAllProducts()]);
+      setSuppliers(sup);
+      setProducts(prod);
+    } catch {
+      addToast('Failed to refresh suppliers and products', 'error');
+    }
+    setForm({ supplier_id: '', product_id: '', quantity: '', unit_cost: '' });
+    setModalOpen(true);
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
+
+    setSubmitting(true);
     try {
-      await createPurchaseOrder({
+      const created = await createPurchaseOrder({
         supplier_id: form.supplier_id,
         product_id: form.product_id,
-        quantity: parseInt(form.quantity),
+        quantity: parseInt(form.quantity, 10),
         unit_cost: parseFloat(form.unit_cost),
       });
+      setOrders((prev) => [created, ...prev.filter((o) => o.id !== created.id)]);
       addToast('Purchase order created', 'success');
       setModalOpen(false);
       setForm({ supplier_id: '', product_id: '', quantity: '', unit_cost: '' });
-      load();
-    } catch {
-      addToast('Failed to create purchase order', 'error');
+      await load();
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : 'Failed to create purchase order', 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -58,7 +79,7 @@ const AdminPurchasesPage: React.FC = () => {
     try {
       await markPurchaseReceived(id);
       addToast('Stock updated — purchase received', 'success');
-      load();
+      await load();
     } catch (err: unknown) {
       addToast(err instanceof Error ? err.message : 'Failed to receive', 'error');
     }
@@ -75,7 +96,7 @@ const AdminPurchasesPage: React.FC = () => {
           <h1 className="text-2xl font-bold text-earth-900">Purchase Orders</h1>
           <p className="text-sm text-earth-500 mt-1">Buy inventory from suppliers</p>
         </div>
-        <button onClick={() => setModalOpen(true)} className="flex items-center px-4 py-2 bg-organic-600 text-white rounded-lg hover:bg-organic-700">
+        <button onClick={() => void openCreateModal()} className="flex items-center px-4 py-2 bg-organic-600 text-white rounded-lg hover:bg-organic-700">
           <PlusIcon className="h-5 w-5 mr-2" /> New Purchase Order
         </button>
       </div>
@@ -93,25 +114,33 @@ const AdminPurchasesPage: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-earth-200">
-            {orders.map((po) => (
-              <tr key={po.id}>
-                <td className="px-6 py-4 text-sm font-medium">{po.product?.name || '—'}</td>
-                <td className="px-6 py-4 text-sm">{po.supplier?.name || '—'}</td>
-                <td className="px-6 py-4 text-sm">{po.quantity}</td>
-                <td className="px-6 py-4 text-sm">₨{Number(po.unit_cost).toLocaleString()}</td>
-                <td className="px-6 py-4"><StatusBadge status={po.status} /></td>
-                <td className="px-6 py-4">
-                  {po.status === 'ordered' && (
-                    <button
-                      onClick={() => handleReceive(po.id)}
-                      className="px-3 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700"
-                    >
-                      Mark Received
-                    </button>
-                  )}
+            {orders.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-6 py-8 text-center text-earth-500">
+                  No purchase orders yet. Create one to restock inventory.
                 </td>
               </tr>
-            ))}
+            ) : (
+              orders.map((po) => (
+                <tr key={po.id}>
+                  <td className="px-6 py-4 text-sm font-medium">{po.product?.name || '—'}</td>
+                  <td className="px-6 py-4 text-sm">{po.supplier?.name || '—'}</td>
+                  <td className="px-6 py-4 text-sm">{po.quantity}</td>
+                  <td className="px-6 py-4 text-sm">₨{Number(po.unit_cost).toLocaleString()}</td>
+                  <td className="px-6 py-4"><StatusBadge status={po.status} /></td>
+                  <td className="px-6 py-4">
+                    {po.status === 'ordered' && (
+                      <button
+                        onClick={() => void handleReceive(po.id)}
+                        className="px-3 py-1 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700"
+                      >
+                        Mark Received
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -122,13 +151,21 @@ const AdminPurchasesPage: React.FC = () => {
             <option value="">Select supplier</option>
             {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
+          {suppliers.length === 0 && (
+            <p className="text-sm text-amber-600">No suppliers found. Add a supplier first.</p>
+          )}
           <select required value={form.product_id} onChange={(e) => setForm({ ...form, product_id: e.target.value })} className="w-full px-4 py-2 border rounded-lg">
             <option value="">Select product</option>
             {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
+          {products.length === 0 && (
+            <p className="text-sm text-amber-600">No products found. Add a product first.</p>
+          )}
           <input required type="number" min="1" placeholder="Quantity" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} className="w-full px-4 py-2 border rounded-lg" />
           <input required type="number" step="0.01" min="0" placeholder="Unit cost (₨)" value={form.unit_cost} onChange={(e) => setForm({ ...form, unit_cost: e.target.value })} className="w-full px-4 py-2 border rounded-lg" />
-          <button type="submit" className="w-full btn-primary py-2">Create Order</button>
+          <button type="submit" disabled={submitting || suppliers.length === 0 || products.length === 0} className="w-full btn-primary py-2 disabled:opacity-50">
+            {submitting ? 'Creating...' : 'Create Order'}
+          </button>
         </form>
       </Modal>
     </div>

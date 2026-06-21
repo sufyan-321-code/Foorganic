@@ -4,11 +4,16 @@ import { Supplier } from '../types';
 import { getAllSuppliers, createSupplier, updateSupplier, deleteSupplier } from '../services/supplierService';
 import { Modal } from '../components';
 import { useToast } from '../context/ToastContext';
+import { useRefreshOnNavigate } from '../hooks/useRefreshOnNavigate';
+
+const sortSuppliers = (items: Supplier[]) =>
+  [...items].sort((a, b) => a.name.localeCompare(b.name));
 
 const AdminSuppliersPage: React.FC = () => {
   const { addToast } = useToast();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
@@ -17,7 +22,7 @@ const AdminSuppliersPage: React.FC = () => {
 
   const load = useCallback(async () => {
     try {
-      setSuppliers(await getAllSuppliers());
+      setSuppliers(sortSuppliers(await getAllSuppliers()));
     } catch {
       addToast('Failed to load suppliers', 'error');
     } finally {
@@ -26,6 +31,7 @@ const AdminSuppliersPage: React.FC = () => {
   }, [addToast]);
 
   useEffect(() => { load(); }, [load]);
+  useRefreshOnNavigate('/labadmin/suppliers', load);
 
   const openCreate = () => {
     setEditing(null);
@@ -41,18 +47,25 @@ const AdminSuppliersPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
+
+    setSubmitting(true);
     try {
       if (editing) {
-        await updateSupplier(editing.id, form);
+        const updated = await updateSupplier(editing.id, form);
+        setSuppliers((prev) => sortSuppliers(prev.map((s) => (s.id === updated.id ? updated : s))));
         addToast('Supplier updated', 'success');
       } else {
-        await createSupplier(form);
+        const created = await createSupplier(form);
+        setSuppliers((prev) => sortSuppliers([...prev, created]));
         addToast('Supplier created', 'success');
       }
       setModalOpen(false);
-      load();
-    } catch {
-      addToast('Failed to save supplier', 'error');
+      await load();
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : 'Failed to save supplier', 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -60,11 +73,12 @@ const AdminSuppliersPage: React.FC = () => {
     if (!toDelete) return;
     try {
       await deleteSupplier(toDelete.id);
+      setSuppliers((prev) => prev.filter((s) => s.id !== toDelete.id));
       addToast('Supplier deleted', 'success');
       setDeleteModalOpen(false);
-      load();
-    } catch {
-      addToast('Failed to delete supplier', 'error');
+      await load();
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : 'Failed to delete supplier', 'error');
     }
   };
 
@@ -93,18 +107,26 @@ const AdminSuppliersPage: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-earth-200">
-            {suppliers.map((s) => (
-              <tr key={s.id}>
-                <td className="px-6 py-4 text-sm font-medium">{s.name}</td>
-                <td className="px-6 py-4 text-sm">{s.contact_person}</td>
-                <td className="px-6 py-4 text-sm">{s.phone}</td>
-                <td className="px-6 py-4 text-sm">{s.email || '—'}</td>
-                <td className="px-6 py-4 text-right space-x-2">
-                  <button onClick={() => openEdit(s)} className="text-blue-600 hover:text-blue-800"><PencilIcon className="h-5 w-5 inline" /></button>
-                  <button onClick={() => { setToDelete(s); setDeleteModalOpen(true); }} className="text-red-600 hover:text-red-800"><TrashIcon className="h-5 w-5 inline" /></button>
+            {suppliers.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-6 py-8 text-center text-earth-500">
+                  No suppliers yet. Click &quot;Add Supplier&quot; to create one.
                 </td>
               </tr>
-            ))}
+            ) : (
+              suppliers.map((s) => (
+                <tr key={s.id}>
+                  <td className="px-6 py-4 text-sm font-medium">{s.name}</td>
+                  <td className="px-6 py-4 text-sm">{s.contact_person}</td>
+                  <td className="px-6 py-4 text-sm">{s.phone}</td>
+                  <td className="px-6 py-4 text-sm">{s.email || '—'}</td>
+                  <td className="px-6 py-4 text-right space-x-2">
+                    <button onClick={() => openEdit(s)} className="text-blue-600 hover:text-blue-800"><PencilIcon className="h-5 w-5 inline" /></button>
+                    <button onClick={() => { setToDelete(s); setDeleteModalOpen(true); }} className="text-red-600 hover:text-red-800"><TrashIcon className="h-5 w-5 inline" /></button>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -115,7 +137,9 @@ const AdminSuppliersPage: React.FC = () => {
           <input required placeholder="Contact person" value={form.contact_person} onChange={(e) => setForm({ ...form, contact_person: e.target.value })} className="w-full px-4 py-2 border rounded-lg" />
           <input required placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full px-4 py-2 border rounded-lg" />
           <input type="email" placeholder="Email (optional)" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full px-4 py-2 border rounded-lg" />
-          <button type="submit" className="w-full btn-primary py-2">{editing ? 'Update' : 'Create'}</button>
+          <button type="submit" disabled={submitting} className="w-full btn-primary py-2 disabled:opacity-50">
+            {submitting ? 'Saving...' : editing ? 'Update' : 'Create'}
+          </button>
         </form>
       </Modal>
 
