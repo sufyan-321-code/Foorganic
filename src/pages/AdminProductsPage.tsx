@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { Product, Supplier } from '../types';
 import {
@@ -37,7 +37,7 @@ const AdminProductsPage: React.FC = () => {
     stock_quantity: '0',
   });
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const [prod, sup] = await Promise.all([getAllProducts(), getAllSuppliers()]);
       setProducts(prod);
@@ -47,9 +47,9 @@ const AdminProductsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [addToast]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const openCreate = () => {
     setEditing(null);

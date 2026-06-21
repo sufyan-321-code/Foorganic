@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { PlusIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { Supplier } from '../types';
 import { getAllSuppliers, createSupplier, updateSupplier, deleteSupplier } from '../services/supplierService';
@@ -15,7 +15,7 @@ const AdminSuppliersPage: React.FC = () => {
   const [toDelete, setToDelete] = useState<Supplier | null>(null);
   const [form, setForm] = useState({ name: '', contact_person: '', phone: '', email: '' });
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setSuppliers(await getAllSuppliers());
     } catch {
@@ -23,9 +23,9 @@ const AdminSuppliersPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [addToast]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const openCreate = () => {
     setEditing(null);

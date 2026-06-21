@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Order } from '../types';
 import {
   getAllOrders,
@@ -16,7 +16,7 @@ const AdminOrdersPage: React.FC = () => {
   const [filter, setFilter] = useState<'all' | 'pending' | 'paid'>('all');
   const [selected, setSelected] = useState<Order | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setOrders(await getAllOrders());
     } catch {
@@ -24,9 +24,9 @@ const AdminOrdersPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [addToast]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const filtered = orders.filter((o) => {
     if (filter === 'pending') return o.order_status === 'pending';

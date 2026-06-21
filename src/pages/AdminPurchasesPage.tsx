@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { PlusIcon } from '@heroicons/react/24/outline';
 import { PurchaseOrder, Supplier, Product } from '../types';
 import { getAllPurchaseOrders, createPurchaseOrder, markPurchaseReceived } from '../services/purchaseService';
@@ -17,7 +17,7 @@ const AdminPurchasesPage: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState({ supplier_id: '', product_id: '', quantity: '', unit_cost: '' });
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const [po, sup, prod] = await Promise.all([
         getAllPurchaseOrders(),
@@ -32,9 +32,9 @@ const AdminPurchasesPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [addToast]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
